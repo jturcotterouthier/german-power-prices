@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>German Power Prices Dashboard</title>
+<title>European Power Prices Dashboard</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:12px}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:12px}
 .hdr{text-align:center;margin-bottom:12px}
 .hdr h1{font-size:1.4em;color:#fff}
 .hdr p{font-size:.8em;color:#888;margin-top:2px}
@@ -35,8 +35,59 @@ td:first-child,th:first-child{text-align:left}
 .legend span{display:flex;align-items:center;gap:4px}
 .legend i{display:inline-block;width:20px;height:3px;border-radius:2px}
 #status{font-size:.75em;color:#888;text-align:center;margin:4px 0}
+.mkt-row{display:flex;gap:6px;align-items:center;justify-content:center;flex-wrap:wrap;margin-bottom:6px}
 </style></head><body>
-<div class="hdr"><h1>Quarter-Hourly German Day-Ahead Power Prices</h1><p>EPEX Spot DE-LU | Source: Energy-Charts (Fraunhofer ISE) | CC BY 4.0</p></div>
+<div class="hdr"><h1>European Day-Ahead Power Prices</h1><p>EPEX Spot & Nord Pool | Source: Energy-Charts (Fraunhofer ISE) | CC BY 4.0</p></div>
+<div class="mkt-row">
+<label>Market:</label>
+<select id="mktSel" onchange="switchMarket()">
+<optgroup label="Western Europe">
+<option value="DE-LU" selected>Germany/Luxembourg (DE-LU)</option>
+<option value="FR">France (FR)</option>
+<option value="NL">Netherlands (NL)</option>
+<option value="BE">Belgium (BE)</option>
+<option value="AT">Austria (AT)</option>
+<option value="CH">Switzerland (CH)</option>
+</optgroup>
+<optgroup label="Nordics">
+<option value="DK1">Denmark West (DK1)</option>
+<option value="DK2">Denmark East (DK2)</option>
+<option value="NO1">Norway South (NO1)</option>
+<option value="NO2">Norway Central (NO2)</option>
+<option value="SE1">Sweden North (SE1)</option>
+<option value="SE2">Sweden Central (SE2)</option>
+<option value="SE3">Sweden South (SE3)</option>
+<option value="SE4">Sweden Malmö (SE4)</option>
+<option value="FI">Finland (FI)</option>
+</optgroup>
+<optgroup label="Iberian">
+<option value="ES">Spain (ES)</option>
+<option value="PT">Portugal (PT)</option>
+</optgroup>
+<optgroup label="Italy">
+<option value="IT-North">Italy North (IT-North)</option>
+<option value="IT-South">Italy South (IT-South)</option>
+</optgroup>
+<optgroup label="Central/Eastern">
+<option value="PL">Poland (PL)</option>
+<option value="CZ">Czech Republic (CZ)</option>
+<option value="HU">Hungary (HU)</option>
+<option value="SK">Slovakia (SK)</option>
+<option value="SI">Slovenia (SI)</option>
+<option value="HR">Croatia (HR)</option>
+<option value="RO">Romania (RO)</option>
+<option value="BG">Bulgaria (BG)</option>
+</optgroup>
+<optgroup label="Baltics">
+<option value="EE">Estonia (EE)</option>
+<option value="LV">Latvia (LV)</option>
+<option value="LT">Lithuania (LT)</option>
+</optgroup>
+<optgroup label="Other">
+<option value="GR">Greece (GR)</option>
+</optgroup>
+</select>
+</div>
 <div class="ctrl">
 <label>Highlight from: <input type="date" id="hlDate" value="2026-03-03"></label>
 <button onclick="doRefresh()">Refresh Data</button>
@@ -59,144 +110,29 @@ td:first-child,th:first-child{text-align:left}
 <div class="panel" id="p3"><canvas id="c3" height="400"></canvas></div>
 <div class="footer">Data: <a href="https://energy-charts.info">energy-charts.info</a> (Fraunhofer ISE) | Updates daily after EPEX auction ~12:45 CET</div>
 <script>
+var allPrices=[],startTs=0,interval=900,days={},dayKeys=[],activeTab=0,currentBzn="DE-LU";
 function aMax(a){var m=-Infinity;for(var i=0;i<a.length;i++)if(a[i]!==null&&a[i]>m)m=a[i];return m}
 function aMin(a){var m=Infinity;for(var i=0;i<a.length;i++)if(a[i]!==null&&a[i]<m)m=a[i];return m}
 function aAvg(a){var s=0,c=0;for(var i=0;i<a.length;i++)if(a[i]!==null){s+=a[i];c++}return c?s/c:0}
-function fmt(v){return v==null?"\u2014":v.toFixed(2)}
+function fmt(v){return v===null?"N/A":v.toFixed(2)}
 function dateStr(ts){var d=new Date(ts*1000);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
-
-var allPrices=[],startTs=0,interval=900,days={},dayKeys=[];
-var GREY="rgba(120,120,160,0.35)",RED="rgba(239,68,68,0.8)",BLUE="rgba(74,108,247,0.8)";
-
-function groupByDay(prices,start,intv){
-  var d={};for(var i=0;i<prices.length;i++){
-    if(prices[i]===null)continue;var ts=start+i*intv;
-    var dt=new Date((ts+3600)*1000);
-    var key=dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");
-    var hr=(ts%86400)/3600;if(!d[key])d[key]=[];d[key].push({hr:hr,price:prices[i],ts:ts});
-  }return d;
-}
-
-function updateStats(){
-  var sr=document.getElementById("statsRow");var valid=allPrices.filter(function(v){return v!==null});
-  var mn=aMin(valid),mx=aMax(valid),av=aAvg(valid),cur=valid.length?valid[valid.length-1]:0;
-  while(sr.firstChild)sr.removeChild(sr.firstChild);
-  [["Latest (EUR/MWh)",cur],["Average",av],["Min",mn],["Max",mx],["Range",mx-mn]].forEach(function(it){
-    var d=document.createElement("div");d.className="stat";
-    var v=document.createElement("div");v.className="val";v.textContent=fmt(it[1]);
-    var l=document.createElement("div");l.className="lbl";l.textContent=it[0];
-    d.appendChild(v);d.appendChild(l);sr.appendChild(d);
-  });
-}
-
-var activeTab=0;
-function showTab(n){activeTab=n;var tabs=document.querySelectorAll(".tab");var panels=document.querySelectorAll(".panel");
-  for(var i=0;i<tabs.length;i++){tabs[i].className=i===n?"tab active":"tab";panels[i].className=i===n?"panel active":"panel"}draw();}
-
-function clearCanvas(id,ht){var c=document.getElementById(id);c.height=ht||400;c.width=c.parentElement.clientWidth-24;
-  var ctx=c.getContext("2d");ctx.fillStyle="#0d0d22";ctx.fillRect(0,0,c.width,c.height);return{c:c,ctx:ctx,w:c.width,h:c.height};}
-
-function drawAxes(ctx,w,h,pad,yMin,yMax,xLabels){
-  ctx.strokeStyle="#333";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,h-pad.b);ctx.lineTo(w-pad.r,h-pad.b);ctx.stroke();
-  ctx.fillStyle="#888";ctx.font="10px sans-serif";ctx.textAlign="right";var yS=6;
-  for(var i=0;i<=yS;i++){var v=yMin+(yMax-yMin)*i/yS;var y=h-pad.b-(i/yS)*(h-pad.t-pad.b);ctx.fillText(v.toFixed(0),pad.l-4,y+3);
-    if(i>0){ctx.strokeStyle="#1a1a2e";ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke();ctx.strokeStyle="#333";}}
-  if(xLabels){ctx.textAlign="center";var pW=w-pad.l-pad.r;for(var i=0;i<xLabels.length;i++){ctx.fillText(xLabels[i],pad.l+(i/(xLabels.length-1))*pW,h-pad.b+14);}}
-  ctx.save();ctx.translate(10,h/2);ctx.rotate(-Math.PI/2);ctx.fillStyle="#888";ctx.font="10px sans-serif";ctx.textAlign="center";ctx.fillText("EUR/MWh",0,0);ctx.restore();
-}
-function drawProfiles(){var r=clearCanvas("c0",420);var ctx=r.ctx,w=r.w,h=r.h;
-  var pad={t:20,r:20,b:30,l:55};var pW=w-pad.l-pad.r,pH=h-pad.t-pad.b;
-  var hlDate=document.getElementById("hlDate").value||"2026-03-03";
-  var allV=[];dayKeys.forEach(function(k){days[k].forEach(function(p){allV.push(p.price)})});
-  if(!allV.length)return;var yMin=Math.floor(aMin(allV)/10)*10,yMax=Math.ceil(aMax(allV)/10)*10;if(yMin===yMax)yMax=yMin+10;
-  drawAxes(ctx,w,h,pad,yMin,yMax,["00:00","04:00","08:00","12:00","16:00","20:00","24:00"]);
-  function drawLine(key,color){var pts=days[key].slice().sort(function(a,b){return a.hr-b.hr});if(pts.length<2)return;
-    ctx.strokeStyle=color;ctx.lineWidth=color===GREY?1:1.5;ctx.beginPath();var first=true;
-    for(var i=0;i<pts.length;i++){var x=pad.l+(pts[i].hr/24)*pW;var y=h-pad.b-((pts[i].price-yMin)/(yMax-yMin))*pH;
-      if(first){ctx.moveTo(x,y);first=false}else ctx.lineTo(x,y);}ctx.stroke();}
-  dayKeys.filter(function(k){return k<hlDate}).forEach(function(k){drawLine(k,GREY)});
-  dayKeys.filter(function(k){return k>=hlDate}).forEach(function(k){drawLine(k,RED)});
-  var leg=document.getElementById("leg0");while(leg.firstChild)leg.removeChild(leg.firstChild);
-  [{c:GREY,t:"Before "+hlDate},{c:RED,t:"From "+hlDate}].forEach(function(it){
-    var sp=document.createElement("span");var ic=document.createElement("i");ic.style.background=it.c;
-    sp.appendChild(ic);sp.appendChild(document.createTextNode(it.t));leg.appendChild(sp);});
-}
-
-function drawTimeSeries(){var r=clearCanvas("c1",380);var ctx=r.ctx,w=r.w,h=r.h;
-  var pad={t:20,r:20,b:30,l:55};var pW=w-pad.l-pad.r,pH=h-pad.t-pad.b;
-  var valid=allPrices.filter(function(v){return v!==null});if(!valid.length)return;
-  var yMin=Math.floor(aMin(valid)/10)*10,yMax=Math.ceil(aMax(valid)/10)*10;
-  var nL=7,xL=[];for(var i=0;i<nL;i++){var idx=Math.floor(i*(allPrices.length-1)/(nL-1));xL.push(dateStr(startTs+idx*interval))}
-  drawAxes(ctx,w,h,pad,yMin,yMax,xL);ctx.strokeStyle=BLUE;ctx.lineWidth=1;ctx.beginPath();var first=true;
-  for(var i=0;i<allPrices.length;i++){if(allPrices[i]===null)continue;var x=pad.l+(i/(allPrices.length-1))*pW;
-    var y=h-pad.b-((allPrices[i]-yMin)/(yMax-yMin))*pH;if(first){ctx.moveTo(x,y);first=false}else ctx.lineTo(x,y);}ctx.stroke();
-  var hlDate=document.getElementById("hlDate").value;if(hlDate){
-    var hlTs=new Date(hlDate+"T00:00:00+01:00").getTime()/1000;var idx=Math.round((hlTs-startTs)/interval);
-    if(idx>0&&idx<allPrices.length){var x=pad.l+(idx/(allPrices.length-1))*pW;
-      ctx.strokeStyle="rgba(239,68,68,0.5)";ctx.lineWidth=2;ctx.setLineDash([4,4]);
-      ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,h-pad.b);ctx.stroke();ctx.setLineDash([]);
-      ctx.fillStyle="#ef4444";ctx.font="10px sans-serif";ctx.textAlign="center";ctx.fillText(hlDate,x,pad.t-4);}}
-}
-function drawPeakTrough(){var r=clearCanvas("c2",380);var ctx=r.ctx,w=r.w,h=r.h;
-  var pad={t:20,r:20,b:40,l:55};var pW=w-pad.l-pad.r,pH=h-pad.t-pad.b;
-  var dS=dayKeys.map(function(k){var ps=days[k].map(function(p){return p.price});
-    return{date:k,min:aMin(ps),max:aMax(ps),avg:aAvg(ps),spread:aMax(ps)-aMin(ps)};});
-  if(!dS.length)return;var spreads=dS.map(function(s){return s.spread});
-  var yMax=Math.ceil(aMax(spreads)/10)*10;if(yMax<10)yMax=10;
-  drawAxes(ctx,w,h,pad,0,yMax,null);var bW=Math.max(2,pW/dS.length-2);
-  var hlDate=document.getElementById("hlDate").value||"2026-03-03";
-  for(var i=0;i<dS.length;i++){var s=dS[i];var x=pad.l+(i+0.5)/dS.length*pW-bW/2;
-    var bH=(s.spread/yMax)*pH;var y=h-pad.b-bH;
-    ctx.fillStyle=s.date>=hlDate?"rgba(239,68,68,0.7)":"rgba(74,108,247,0.6)";ctx.fillRect(x,y,bW,bH);
-    if(dS.length<=31||i%Math.ceil(dS.length/15)===0){ctx.save();ctx.translate(pad.l+(i+0.5)/dS.length*pW,h-pad.b+6);
-      ctx.rotate(Math.PI/4);ctx.fillStyle="#888";ctx.font="9px sans-serif";ctx.textAlign="left";ctx.fillText(s.date.slice(5),0,0);ctx.restore();}}
-  var tbl=document.getElementById("tbl2");while(tbl.firstChild)tbl.removeChild(tbl.firstChild);
-  var table=document.createElement("table");var hdr=table.insertRow();
-  ["Date","Min","Max","Avg","Spread (Peak-Trough)"].forEach(function(t){var th=document.createElement("th");th.textContent=t;hdr.appendChild(th)});
-  dS.slice().sort(function(a,b){return b.spread-a.spread}).forEach(function(s){var row=table.insertRow();
-    [s.date,fmt(s.min),fmt(s.max),fmt(s.avg),fmt(s.spread)].forEach(function(v,ci){var td=row.insertCell();td.textContent=v;if(ci===4&&s.spread>80)td.className="neg";});});
-  tbl.appendChild(table);
-}
-
-function drawHeatmap(){var nR=dayKeys.length;var tH=Math.max(400,nR*16+60);
-  var r=clearCanvas("c3",tH);var ctx=r.ctx,w=r.w,h=r.h;
-  var pad={t:30,r:20,b:30,l:80};var pW=w-pad.l-pad.r;var rH=Math.max(10,Math.min(18,(h-pad.t-pad.b)/nR));
-  var spd=Math.round(86400/interval);var cW=pW/spd;
-  var valid=allPrices.filter(function(v){return v!==null});var pMn=aMin(valid),pMx=aMax(valid),pMd=(pMn+pMx)/2;
-  function hC(v){if(v===null)return"#1a1a2e";var r2,g,b;
-    if(v<=pMd){var t=(v-pMn)/(pMd-pMn||1);r2=Math.round(30+t*195);g=Math.round(60+t*165);b=Math.round(200-t*30)}
-    else{var t=(v-pMd)/(pMx-pMd||1);r2=Math.round(225+t*30);g=Math.round(225-t*180);b=Math.round(170-t*140)}
-    return"rgb("+r2+","+g+","+b+")";}
-  ctx.fillStyle="#888";ctx.font="10px sans-serif";ctx.textAlign="center";
-  for(var i=0;i<24;i+=4)ctx.fillText(String(i).padStart(2,"0")+":00",pad.l+(i/24)*pW+cW,pad.t-8);
-  for(var d=0;d<nR;d++){var y=pad.t+d*rH;ctx.fillStyle="#aaa";ctx.font="9px sans-serif";ctx.textAlign="right";
-    ctx.fillText(dayKeys[d],pad.l-4,y+rH/2+3);var dp=days[dayKeys[d]].slice().sort(function(a,b){return a.hr-b.hr});
-    for(var j=0;j<dp.length;j++){ctx.fillStyle=hC(dp[j].price);ctx.fillRect(pad.l+(dp[j].hr/24)*pW,y,Math.ceil(cW)+1,rH-1);}}
-  var lY=pad.t+nR*rH+8,lW=200,lX=(w-lW)/2;
-  for(var i=0;i<lW;i++){ctx.fillStyle=hC(pMn+(pMx-pMn)*i/lW);ctx.fillRect(lX+i,lY,1,10)}
-  ctx.fillStyle="#888";ctx.font="9px sans-serif";ctx.textAlign="center";
-  ctx.fillText(fmt(pMn),lX,lY+22);ctx.fillText(fmt(pMx),lX+lW,lY+22);ctx.fillText("EUR/MWh",lX+lW/2,lY+22);
-}
+function groupByDay(prices,st,intv){var g={};for(var i=0;i<prices.length;i++){var t=st+i*intv;var dk=dateStr(t);if(!g[dk])g[dk]={prices:[],date:dk};g[dk].prices.push(prices[i])}return g}
+function updateStats(){var sr=document.getElementById("statsRow");sr.innerHTML="";if(!allPrices.length)return;var items=[["Latest",fmt(allPrices[allPrices.length-1]),"EUR/MWh"],["Average",fmt(aAvg(allPrices)),""],["Min",fmt(aMin(allPrices)),""],["Max",fmt(aMax(allPrices)),""],["Range",fmt(aMax(allPrices)-aMin(allPrices)),""]];items.forEach(function(it){var d=document.createElement("div");d.className="stat";var v=document.createElement("div");v.className="val";v.textContent=it[1];var l=document.createElement("div");l.className="lbl";l.textContent=it[0]+(it[2]?" ("+it[2]+")":"");d.appendChild(v);d.appendChild(l);sr.appendChild(d)})}
+function showTab(n){activeTab=n;var tabs=document.querySelectorAll(".tab");var panels=document.querySelectorAll(".panel");for(var i=0;i<tabs.length;i++){tabs[i].className=i===n?"tab active":"tab";panels[i].className=i===n?"panel active":"panel"}draw()}
+function clearCanvas(id,h){var c=document.getElementById(id);var r=c.getBoundingClientRect();c.width=r.width*2;c.height=(h||r.height)*2;var ctx=c.getContext("2d");ctx.scale(2,2);ctx.clearRect(0,0,r.width,h||r.height);return{ctx:ctx,w:r.width,h:h||r.height}}
+function drawAxes(ctx,w,h,pad,yMin,yMax,xLabels){ctx.strokeStyle="#333";ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,h-pad.b);ctx.lineTo(w-pad.r,h-pad.b);ctx.stroke();ctx.fillStyle="#888";ctx.font="9px sans-serif";var steps=6;for(var i=0;i<=steps;i++){var y=pad.t+i*(h-pad.t-pad.b)/steps;var val=yMax-(yMax-yMin)*i/steps;ctx.textAlign="right";ctx.fillText(Math.round(val),pad.l-4,y+3);ctx.strokeStyle="#222";ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke()}if(xLabels){ctx.textAlign="center";xLabels.forEach(function(lb){ctx.fillText(lb[0],lb[1],h-pad.b+12)})}}
+function drawProfiles(){var r=clearCanvas("c0",400);var ctx=r.ctx,w=r.w,h=r.h;if(!dayKeys.length)return;var pad={t:20,r:20,b:40,l:50};var pW=w-pad.l-pad.r;var hlDate=document.getElementById("hlDate").value||"2026-03-03";var leg0=document.getElementById("leg0");leg0.innerHTML="";var sp1=document.createElement("span");sp1.innerHTML='<i style="background:rgba(74,108,247,0.5)"><\/i>Before '+hlDate;leg0.appendChild(sp1);var sp2=document.createElement("span");sp2.innerHTML='<i style="background:#ef4444"><\/i>From '+hlDate;leg0.appendChild(sp2);var allV=[];dayKeys.forEach(function(k){allV=allV.concat(days[k].prices)});var yMin=aMin(allV),yMax=aMax(allV);if(yMin===yMax){yMin-=10;yMax+=10}var ppd=days[dayKeys[0]].prices.length;var xLbls=[];for(var i=0;i<=4;i++){var hr=String(i*6).padStart(2,"0")+":00";xLbls.push([hr,pad.l+i*6/24*pW])}xLbls.push(["24:00",pad.l+pW]);drawAxes(ctx,w,h,pad,yMin,yMax,xLbls);ctx.lineWidth=1;dayKeys.forEach(function(dk){var ps=days[dk].prices;var isHl=dk>=hlDate;ctx.strokeStyle=isHl?"rgba(239,68,68,0.7)":"rgba(74,108,247,0.5)";ctx.beginPath();for(var i=0;i<ps.length;i++){if(ps[i]===null)continue;var x=pad.l+i/ps.length*pW;var y=pad.t+(1-(ps[i]-yMin)/(yMax-yMin))*(h-pad.t-pad.b);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke()});ctx.fillStyle="#888";ctx.textAlign="left";ctx.font="9px sans-serif";ctx.fillText("EUR/MWh",2,pad.t+10)}
+function drawTimeSeries(){var r=clearCanvas("c1",350);var ctx=r.ctx,w=r.w,h=r.h;if(!allPrices.length)return;var pad={t:20,r:20,b:40,l:50};var pW=w-pad.l-pad.r;var yMin=aMin(allPrices),yMax=aMax(allPrices);if(yMin===yMax){yMin-=10;yMax+=10}var hlDate=document.getElementById("hlDate").value||"2026-03-03";var hlTs=new Date(hlDate).getTime()/1000;var n=allPrices.length;drawAxes(ctx,w,h,pad,yMin,yMax);ctx.lineWidth=1;var prevHl=false;ctx.beginPath();for(var i=0;i<n;i++){var t=startTs+i*interval;var isHl=t>=hlTs;var x=pad.l+i/n*pW;var y=pad.t+(1-(allPrices[i]-yMin)/(yMax-yMin))*(h-pad.t-pad.b);if(i===0||isHl!==prevHl){ctx.stroke();ctx.strokeStyle=isHl?"#ef4444":"rgba(74,108,247,0.8)";ctx.beginPath();ctx.moveTo(x,y)}else{ctx.lineTo(x,y)}prevHl=isHl}ctx.stroke();ctx.fillStyle="#888";ctx.font="9px sans-serif";ctx.textAlign="left";var step=Math.max(1,Math.floor(dayKeys.length/8));for(var i=0;i<dayKeys.length;i+=step){var dx=pad.l+(i/dayKeys.length)*pW;ctx.save();ctx.translate(dx,h-pad.b+10);ctx.rotate(-0.5);ctx.textAlign="left";ctx.fillText(dayKeys[i],0,0);ctx.restore()}}
+function drawPeakTrough(){var r=clearCanvas("c2",300);var ctx=r.ctx,w=r.w,h=r.h;if(!dayKeys.length)return;var pad={t:20,r:20,b:40,l:50};var pW=w-pad.l-pad.r;var dS=dayKeys.map(function(k){var ps=days[k].prices;return{date:k,min:aMin(ps),max:aMax(ps),avg:aAvg(ps),spread:aMax(ps)-aMin(ps)}});var spreads=dS.map(function(s){return s.spread});var yMax=aMax(spreads)*1.1;if(yMax<10)yMax=10;drawAxes(ctx,w,h,pad,0,yMax,null);var bW=Math.max(2,pW/dS.length-2);var hlDate=document.getElementById("hlDate").value||"2026-03-03";for(var i=0;i<dS.length;i++){var s=dS[i];var x=pad.l+(i+0.5)/dS.length*pW-bW/2;var bH=(s.spread/yMax)*(h-pad.t-pad.b);var y=h-pad.b-bH;ctx.fillStyle=s.date>=hlDate?"rgba(239,68,68,0.7)":"rgba(74,108,247,0.6)";ctx.fillRect(x,y,bW,bH)}if(dS.length<31||1){ctx.fillStyle="#888";ctx.font="9px sans-serif";for(var i=0;i<dS.length;i+=Math.ceil(dS.length/15)){var s=dS[i];var x=pad.l+(i+0.5)/dS.length*pW;ctx.save();ctx.translate(x,h-pad.b+10);ctx.rotate(-0.5);ctx.textAlign="left";ctx.fillText(s.date.slice(5),0,0);ctx.restore()}}var tbl=document.getElementById("tbl2");while(tbl.firstChild)tbl.removeChild(tbl.firstChild);var table=document.createElement("table");var hdr=table.insertRow();["Date","Min","Max","Avg","Spread (Peak-Trough)"].forEach(function(t){var th=document.createElement("th");th.textContent=t;hdr.appendChild(th)});dS.slice().sort(function(a,b){return b.spread-a.spread}).forEach(function(s){var row=table.insertRow();row.insertCell().textContent=s.date;if(s.min<0){row.insertCell().textContent=fmt(s.min);row.cells[1].className="neg"}else{row.insertCell().textContent=fmt(s.min)}row.insertCell().textContent=fmt(s.max);row.insertCell().textContent=fmt(s.avg);var sc=row.insertCell();sc.textContent=fmt(s.spread);sc.className=s.spread>200?"neg":""});tbl.appendChild(table)}
+function drawHeatmap(){var r=clearCanvas("c3",400);var ctx=r.ctx,w=r.w,h=r.h;if(!dayKeys.length)return;var pad={t:30,r:20,b:40,l:60};var pW=w-pad.l-pad.r;var pH=h-pad.t-pad.b;var nR=dayKeys.length;var validAllPrices=allPrices.filter(function(p){return p!==null});var pMn=aMin(validAllPrices),pMx=aMax(validAllPrices);var spd=Math.round(86400/interval);function hC(v){if(v<pMn){var t=(v-pMn)/(pMx-pMn);return"rgb("+Math.round(200-t*30)+","+Math.round(200-t*30)+",255)"}else{var t=(v-pMn)/(pMx-pMn);return"rgb("+Math.round(255-t*140)+","+Math.round(170-t*140)+","+Math.round(50))}} ctx.fillStyle="#888";ctx.font="9px sans-serif";for(var i=0;i<24;i++){var x=pad.l+i/24*pW;ctx.textAlign="center";ctx.fillText(String(i).padStart(2,"0")+":00",x+pW/48,pad.t-8)}for(var d=0;d<nR;d++){var cH=pH/nR;for(var j=0;j<24;j++){var cW=pW/24;ctx.fillStyle=days[dayKeys[d]]&&days[dayKeys[d]].prices[j*spd/24|0]!==undefined?hC(days[dayKeys[d]].prices[j*spd/24|0]):"#222";ctx.fillRect(pad.l+j*cW,pad.t+d*cH,cW+1,cH+1)}}ctx.fillStyle="#888";ctx.textAlign="right";ctx.font="8px sans-serif";for(var i=0;i<nR;i+=Math.max(1,Math.ceil(nR/15))){var lY=pad.t+i*pH/nR+pH/nR/2;ctx.fillText(dayKeys[i],pad.l-4,lY+3)}var gW=100;var gX=w-pad.r-gW;var gY=pad.t;for(var i=0;i<gW;i++){ctx.fillStyle=hC(pMn+(pMx-pMn)*i/gW);ctx.fillRect(gX+i,gY,2,8)}ctx.fillStyle="#888";ctx.font="7px sans-serif";ctx.textAlign="left";ctx.fillText(Math.round(pMn),gX,gY+18);ctx.textAlign="right";ctx.fillText(Math.round(pMx)+" EUR/MWh",gX+gW,gY+18)}
 function draw(){if(!allPrices.length)return;updateStats();if(activeTab===0)drawProfiles();else if(activeTab===1)drawTimeSeries();else if(activeTab===2)drawPeakTrough();else if(activeTab===3)drawHeatmap()}
 function setStatus(msg){document.getElementById("status").textContent=msg}
-
-function fetchAPI(sd,ed){setStatus("Fetching data from Energy-Charts API...");
-  fetch("https://corsproxy.io/?url="+encodeURIComponent("https://api.energy-charts.info/price?bzn=DE-LU&start="+sd+"&end="+ed))
-  .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
-  .then(function(d){if(!d.unix_seconds||!d.price)throw new Error("Invalid response");
-    allPrices=d.price;startTs=d.unix_seconds[0];interval=d.unix_seconds[1]-d.unix_seconds[0];
-    days=groupByDay(allPrices,startTs,interval);dayKeys=Object.keys(days).sort();
-    setStatus("Loaded "+allPrices.length+" points ("+dayKeys[0]+" to "+dayKeys[dayKeys.length-1]+")");draw();
-  }).catch(function(e){setStatus("Fetch failed: "+e.message)});}
-
-function doRefresh(){var e=new Date();e.setDate(e.getDate()+1);var s=new Date();s.setDate(s.getDate()-21);
-  fetchAPI(s.toISOString().slice(0,10),e.toISOString().slice(0,10));}
-function loadRange(n){var e=new Date();e.setDate(e.getDate()+1);var s=new Date();s.setDate(s.getDate()-n);
-  fetchAPI(s.toISOString().slice(0,10),e.toISOString().slice(0,10));}
-
+function fetchAPI(sd,ed){setStatus("Fetching "+currentBzn+" data from Energy-Charts API...");var url="https://api.energy-charts.info/price?bzn="+currentBzn+"&start="+sd+"&end="+ed;fetch("https://corsproxy.io/?url="+encodeURIComponent(url)).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}).then(function(d){if(!d.unix_seconds||!d.price)throw new Error("Invalid response");allPrices=d.price;startTs=d.unix_seconds[0];interval=d.unix_seconds[1]-d.unix_seconds[0];days=groupByDay(allPrices,startTs,interval);dayKeys=Object.keys(days).sort();setStatus("Loaded "+allPrices.length+" points ("+dayKeys[0]+" to "+dayKeys[dayKeys.length-1]+") for "+currentBzn);draw();}).catch(function(e){setStatus("Fetch failed: "+e.message)});}
+function doRefresh(){var e=new Date();e.setDate(e.getDate()+1);var s=new Date();s.setDate(s.getDate()-21);fetchAPI(s.toISOString().slice(0,10),e.toISOString().slice(0,10));}
+function loadRange(n){var e=new Date();e.setDate(e.getDate()+1);var s=new Date();s.setDate(s.getDate()-n);fetchAPI(s.toISOString().slice(0,10),e.toISOString().slice(0,10));}
+function switchMarket(){currentBzn=document.getElementById("mktSel").value;doRefresh()}
 document.getElementById("hlDate").addEventListener("change",function(){draw()});
 window.addEventListener("resize",function(){draw()});
-
 // Auto-load 3 weeks of data on page load
 doRefresh();
 </script></body></html>
