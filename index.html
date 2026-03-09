@@ -181,7 +181,7 @@ function draw(){if(!allPrices.length)return;updateStats();if(activeTab===0)drawP
 function setStatus(msg){document.getElementById("status").textContent=msg}
 
 function fetchAPI(sd,ed){setStatus("Fetching data from Energy-Charts API...");
-  fetch("https://api.energy-charts.info/price?bzn=DE-LU&start="+sd+"&end="+ed)
+  fetch("https://corsproxy.io/?url="+encodeURIComponent("https://api.energy-charts.info/price?bzn=DE-LU&start="+sd+"&end="+ed))
   .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})
   .then(function(d){if(!d.unix_seconds||!d.price)throw new Error("Invalid response");
     allPrices=d.price;startTs=d.unix_seconds[0];interval=d.unix_seconds[1]-d.unix_seconds[0];
