@@ -58,6 +58,18 @@ td:first-child,th:first-child{text-align:left}
 .dow-bar .dl{margin-top:2px}
 .dow-bar .dv{margin-top:1px;color:#aaa;font-size:.9em}
 .footnote{margin-top:10px;padding:10px 14px;background:#0d0d22;border:1px solid #222;border-radius:4px;font-size:.68em;color:#777;line-height:1.6}.footnote b{color:#aaa;font-weight:600}.footnote .fn-section{margin-bottom:6px}.footnote .fn-section:last-child{margin-bottom:0}.fn-icon{display:inline-block;width:14px;height:14px;border-radius:50%;background:#1e1e3a;color:#4a6cf7;text-align:center;line-height:14px;font-size:9px;font-weight:700;margin-right:4px;vertical-align:middle}
+.tb-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-bottom:10px}
+.tb-card{background:#12122a;border:1px solid #2a2a4e;border-radius:6px;padding:10px 12px}
+.tb-card h4{font-size:.78em;color:#4a6cf7;margin-bottom:4px}
+.tb-card p{font-size:.68em;color:#888;line-height:1.4}
+.tb-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:10px}
+.tb-kpi{background:#12122a;border:1px solid #2a2a4e;border-radius:6px;padding:10px 12px;text-align:center}
+.tb-kpi .tk-label{font-size:.65em;color:#888;text-transform:uppercase;letter-spacing:.5px}
+.tb-kpi .tk-val{font-size:1.3em;font-weight:700;margin:2px 0}
+.tb-kpi .tk-sub{font-size:.65em;color:#666}
+.tb-toggle{display:flex;gap:4px;justify-content:center;margin-bottom:8px}
+.tb-toggle button{background:#1a1a2e;color:#aaa;border:1px solid #333;padding:3px 10px;border-radius:4px;cursor:pointer;font-size:.72em}
+.tb-toggle button.active{background:#4a6cf7;color:#fff;border-color:#4a6cf7}
 </style></head><body>
 <div class="hdr"><h1>European Day-Ahead Power Prices</h1><p>PE Analytics Dashboard | EPEX Spot &amp; Nord Pool | Source: Energy-Charts (Fraunhofer ISE) | CC BY 4.0</p></div>
 <div class="ctrl">
@@ -130,6 +142,7 @@ td:first-child,th:first-child{text-align:left}
 <div class="tab" onclick="showTab(4)">Volatility &amp; Risk</div>
 <div class="tab" onclick="showTab(5)">Daily Profiles</div>
 <div class="tab" onclick="showTab(6)">Heatmap</div>
+<div class="tab" onclick="showTab(7)">TB Spreads</div>
 </div>
 <div class="panel active" id="p0">
 <div class="kpis" id="kpiRow"></div>
@@ -185,6 +198,27 @@ td:first-child,th:first-child{text-align:left}
 <canvas id="c6" height="400"></canvas>
 <div class="footnote"><div class="fn-section"><span class="fn-icon">i</span> <b>Data Source:</b> Hourly day-ahead auction prices from Energy-Charts API (Fraunhofer ISE), sourced from EPEX Spot / Nord Pool. Endpoint: <code>api.energy-charts.info/price?bzn={market}</code>. Resolution: 15-min or 60-min depending on market. License: CC BY 4.0.</div><div class="fn-section"><span class="fn-icon">σ</span> <b>Calculations:</b> Each cell maps one hour of one day to its day-ahead price (€/MWh). The colour gradient is a linear interpolation between the global min (cool blue) and global max (warm red) across the entire loaded date range.</div><div class="fn-section"><span class="fn-icon">☀</span> <b>Solar Asset Owner:</b> Look for consistent midday (10–14h) blue/cool bands — these indicate solar cannibalisation driving prices down during peak generation hours. Seasonal patterns reveal when solar output saturates the market. Weekend vs weekday colour shifts show demand-driven dynamics.</div><div class="fn-section"><span class="fn-icon">🔋</span> <b>BESS Asset Owner:</b> Look for strong daily colour contrast (dark blue and bright red in the same row) — this signals high intraday spread and arbitrage opportunity. Days with uniformly flat colours indicate low spread and poor BESS economics. Identify hours that consistently show extreme colours to optimise charge/discharge scheduling.</div></div>
 </div>
+<div class="panel" id="p7">
+<div class="tb-info">
+<div class="tb-card"><h4>TB1 — 1-Hour Battery</h4><p>Highest hourly price − Lowest hourly price. Max revenue from one optimal charge/discharge cycle. Most sensitive to single-hour price spikes.</p></div>
+<div class="tb-card"><h4>TB2 — Conservative Signal</h4><p>2nd highest − 2nd lowest price. Strips out outlier hours. Better proxy for repeatable, achievable battery revenue.</p></div>
+<div class="tb-card"><h4>TB4 — 4-Hour Battery</h4><p>Σ(4 highest) − Σ(4 lowest prices). Max revenue across four cycles. Captures full daily spread value for larger storage assets.</p></div>
+</div>
+<div class="tb-kpis" id="tbKpis"></div>
+<div class="sub-title">24-Hour Price Profile — Latest Day</div>
+<canvas id="c7a" height="200"></canvas>
+<div class="sub-title">TB Spread Trend — 7-Day Rolling Average</div>
+<div class="tb-toggle" id="tbToggle">
+<button class="active" onclick="setTbView(0)">TB1</button>
+<button onclick="setTbView(1)">TB2</button>
+<button onclick="setTbView(2)">TB4</button>
+<button onclick="setTbView(3)">All</button>
+</div>
+<canvas id="c7b" height="260"></canvas>
+<div class="sub-title">Daily TB Spread Table</div>
+<div class="tbl" id="tbl7"></div>
+<div class="footnote"><div class="fn-section"><span class="fn-icon">i</span> <b>TB Spread Framework:</b> Trading Block spreads measure intraday price volatility from a battery storage perspective. TB1 = max−min (single best cycle). TB2 = 2nd highest − 2nd lowest (strips outliers). TB4 = sum of 4 highest − sum of 4 lowest hourly prices (4-hour storage benchmark). All values in €/MWh.</div><div class="fn-section"><span class="fn-icon">🔋</span> <b>BESS Asset Owner:</b> TB1 is the theoretical maximum single-cycle revenue. TB2 provides a more conservative, repeatable estimate. TB4 captures the full-day spread opportunity for 4-hour duration assets. Compare TB1 vs TB2 to assess how much revenue depends on outlier hours — a large gap signals spike-dependent markets.</div></div>
+</div>
 <div class="footer">Data: <a href="https://energy-charts.info">energy-charts.info</a> (Fraunhofer ISE) | Historical data available from 2011 | Updates daily after EPEX auction ~12:45 CET<br>Assumptions: BESS RTE 88%, 1 cycle/day. Solar hours: 10-14h. Peak: 08-20h.</div>
 <script>
 var allPrices=[],startTs=0,interval=900;
@@ -224,10 +258,18 @@ for(var i=0;i<n;i++){if(ps[i]===null)continue;var h=i/qph;
 if(h>=8&&h<20)peak.push(ps[i]);else offpeak.push(ps[i]);
 if(h>=10&&h<14)solar.push(ps[i]);}
 var dow=new Date(dk+"T12:00:00").getDay();
+var hourly=[];for(var hi=0;hi<24;hi++){var hStart=Math.floor(hi*qph),hEnd=Math.floor((hi+1)*qph);
+var hSum=0,hCnt=0;for(var si=hStart;si<hEnd&&si<n;si++){if(ps[si]!==null){hSum+=ps[si];hCnt++}}
+hourly.push(hCnt?hSum/hCnt:null)}
+var hValid=hourly.filter(function(v){return v!==null}).slice().sort(function(a,b){return b-a});
+var tb1=hValid.length>=2?hValid[0]-hValid[hValid.length-1]:0;
+var tb2=hValid.length>=4?hValid[1]-hValid[hValid.length-2]:0;
+var tb4s=0,tb4l=0;for(var ti=0;ti<Math.min(4,hValid.length);ti++){tb4s+=hValid[ti];tb4l+=hValid[hValid.length-1-ti]}
+var tb4=hValid.length>=8?tb4s-tb4l:0;
 ds.push({date:dk,min:mn,max:mx,avg:av,spread:spread,stdDev:sd,
 negHours:negH,negAvgDepth:negD,
 peakAvg:aAvg(peak),offpeakAvg:aAvg(offpeak),solarAvg:aAvg(solar),
-bessRev:spread*RTE,dow:dow});}
+bessRev:spread*RTE,dow:dow,tb1:tb1,tb2:tb2,tb4:tb4,hourly:hourly});}
 A.daily=ds;
 function roll(field,w){var r=[];for(var i=0;i<ds.length;i++){
 var s=Math.max(0,i-w+1),sum=0,c=0;
@@ -236,6 +278,7 @@ A.rollPrice7=roll("avg",7);A.rollPrice30=roll("avg",30);
 A.rollSpread7=roll("spread",7);A.rollSpread30=roll("spread",30);
 A.rollVol7=roll("stdDev",7);
 A.rollBess7=roll("bessRev",7);A.rollBess30=roll("bessRev",30);
+A.rollTB1_7=roll("tb1",7);A.rollTB2_7=roll("tb2",7);A.rollTB4_7=roll("tb4",7);
 A.rollNeg7=roll("negHours",7);
 A.cumBess=[];var cum=0;
 for(var i=0;i<ds.length;i++){cum+=ds[i].bessRev;A.cumBess.push(cum)}
@@ -583,12 +626,112 @@ for(var i=0;i<gW;i++){ctx.fillStyle=hC(pMn+(pMx-pMn)*i/gW);ctx.fillRect(gX+i,gY,
 ctx.fillStyle="#888";ctx.font="7px sans-serif";ctx.textAlign="left";ctx.fillText(Math.round(pMn),gX,gY+18);
 ctx.textAlign="right";ctx.fillText(Math.round(pMx)+" EUR/MWh",gX+gW,gY+18)}
 
+/* ===== TAB 7: TB SPREADS ===== */
+var tbView=0;
+function setTbView(v){tbView=v;var btns=document.querySelectorAll("#tbToggle button");
+for(var i=0;i<btns.length;i++)btns[i].className=i===v?"active":"";drawTbSpreads()}
+
+function drawTbSpreads(){
+if(!A.daily||!A.daily.length)return;
+var ds=A.daily,n=ds.length;
+var kpis=document.getElementById("tbKpis");kpis.innerHTML="";
+var last=ds[n-1];var tb1_7=kpiVal(ds,"tb1",7),tb2_7=kpiVal(ds,"tb2",7),tb4_7=kpiVal(ds,"tb4",7);
+var items=[
+{label:"DA Avg Today",val:"\u20AC"+fmt(last.avg),sub:last.date,color:"#4a6cf7"},
+{label:"DA High Today",val:"\u20AC"+fmt(last.max),sub:"Peak hour",color:"#f97316"},
+{label:"DA Low Today",val:"\u20AC"+fmt(last.min),sub:"Trough hour",color:"#22c55e"},
+{label:"TB1 Today",val:"\u20AC"+fmt(last.tb1),sub:"1-hr benchmark",color:"#eab308"},
+{label:"TB2 Today",val:"\u20AC"+fmt(last.tb2),sub:"Conservative",color:"#06b6d4"},
+{label:"TB4 Today",val:"\u20AC"+fmt(last.tb4),sub:"4-hr benchmark",color:"#a855f7"},
+{label:"7d Avg TB1",val:"\u20AC"+fmt(tb1_7),sub:"Rolling window",color:"#f472b6"}
+];
+for(var i=0;i<items.length;i++){var it=items[i];var d=document.createElement("div");d.className="tb-kpi";
+d.innerHTML='<div class="tk-label">'+it.label+'</div><div class="tk-val" style="color:'+it.color+'">'+it.val+'</div><div class="tk-sub">'+it.sub+'</div>';
+kpis.appendChild(d)}
+
+/* 24-hour profile bar chart */
+var r=clearCanvas("c7a",200);var ctx=r.ctx,w=r.w,h=r.h;
+var pad={t:20,r:20,b:25,l:50};var pW=w-pad.l-pad.r;
+var hourly=last.hourly;var hValid=hourly.filter(function(v){return v!==null});
+if(hValid.length){
+var sorted=hValid.slice().sort(function(a,b){return b-a});
+var h1=sorted[0],h2=sorted.length>1?sorted[1]:h1;
+var l1=sorted[sorted.length-1],l2=sorted.length>1?sorted[sorted.length-2]:l1;
+var h4Set=new Set(),l4Set=new Set();
+for(var ci=0;ci<Math.min(4,sorted.length);ci++){h4Set.add(sorted[ci]);l4Set.add(sorted[sorted.length-1-ci])}
+var yMin=Math.min(0,aMin(hValid)*1.1),yMax=aMax(hValid)*1.15;if(yMax<=yMin)yMax=yMin+10;
+ctx.fillStyle="#888";ctx.font="9px sans-serif";ctx.textAlign="left";
+ctx.fillText("24-Hour DA Price Profile — "+last.date+" (€/MWh)",pad.l,pad.t-4);
+for(var si=0;si<=4;si++){var y=pad.t+si*(h-pad.t-pad.b)/4;var val=yMax-(yMax-yMin)*si/4;
+ctx.fillStyle="#888";ctx.textAlign="right";ctx.font="8px sans-serif";ctx.fillText(Math.round(val),pad.l-4,y+3);
+ctx.strokeStyle="#1a1a2e";ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke()}
+if(yMin<0){var zY=pad.t+(1-(0-yMin)/(yMax-yMin))*(h-pad.t-pad.b);
+ctx.strokeStyle="rgba(255,255,255,0.15)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad.l,zY);ctx.lineTo(w-pad.r,zY);ctx.stroke()}
+var bW=pW/24-2;
+for(var bi=0;bi<24;bi++){var v=hourly[bi];if(v===null)continue;
+var x=pad.l+bi/24*pW+1;var barH=Math.abs(v-Math.max(0,yMin))/(yMax-yMin)*(h-pad.t-pad.b);
+var barY=v>=0?pad.t+(1-(v-yMin)/(yMax-yMin))*(h-pad.t-pad.b):pad.t+(1-(0-yMin)/(yMax-yMin))*(h-pad.t-pad.b);
+if(v<0)barH=Math.abs(v)/(yMax-yMin)*(h-pad.t-pad.b);
+if(v===h1)ctx.fillStyle="#f97316";
+else if(v===l1)ctx.fillStyle="#22c55e";
+else if(h4Set.has(v))ctx.fillStyle="rgba(249,115,22,0.5)";
+else if(l4Set.has(v))ctx.fillStyle="rgba(168,85,247,0.5)";
+else ctx.fillStyle="rgba(74,108,247,0.55)";
+ctx.fillRect(x,barY,bW,barH);
+if(bi%3===0){ctx.fillStyle="#888";ctx.font="7px sans-serif";ctx.textAlign="center";
+ctx.fillText(String(bi).padStart(2,"0"),x+bW/2,h-pad.b+10)}}
+ctx.fillStyle="#888";ctx.font="7px sans-serif";ctx.textAlign="right";
+ctx.fillText("Orange=H1 | Amber=H2-4 | Green=L1 | Purple=L2-4",w-pad.r,pad.t+8)}
+
+/* TB rolling trend chart */
+var r2=clearCanvas("c7b",260);var ctx2=r2.ctx,w2=r2.w,h2=r2.h;
+var pad2={t:20,r:60,b:35,l:50};var pW2=w2-pad2.l-pad2.r;
+var series=[];
+if(tbView===0||tbView===3)series.push({data:A.rollTB1_7,color:"#eab308",label:"TB1 7d"});
+if(tbView===1||tbView===3)series.push({data:A.rollTB2_7,color:"#06b6d4",label:"TB2 7d"});
+if(tbView===2||tbView===3)series.push({data:A.rollTB4_7,color:"#a855f7",label:"TB4 7d"});
+var allV=[];for(var si=0;si<series.length;si++)allV=allV.concat(series[si].data);
+var yMax2=aMax(allV)*1.15;if(yMax2<10)yMax2=10;var yMin2=0;
+if(tbView===2||tbView===3){var tb4Max=aMax(A.rollTB4_7);if(tb4Max>yMax2*3)yMax2=tb4Max*1.1}
+ctx2.fillStyle="#888";ctx2.font="9px sans-serif";ctx2.textAlign="left";
+ctx2.fillText("TB Spread — 7-Day Rolling Average (€/MWh)",pad2.l,pad2.t-4);
+for(var si=0;si<=4;si++){var y=pad2.t+si*(h2-pad2.t-pad2.b)/4;var val=yMax2-yMax2*si/4;
+ctx2.fillStyle="#888";ctx2.textAlign="right";ctx2.font="8px sans-serif";ctx2.fillText(Math.round(val),pad2.l-4,y+3);
+ctx2.strokeStyle="#1a1a2e";ctx2.lineWidth=0.5;ctx2.beginPath();ctx2.moveTo(pad2.l,y);ctx2.lineTo(w2-pad2.r,y);ctx2.stroke()}
+xDayLabels(pad2,pW2,h2,dayKeys,ctx2);
+for(var si=0;si<series.length;si++){var s=series[si];
+ctx2.strokeStyle=s.color;ctx2.lineWidth=2;ctx2.beginPath();
+for(var i=0;i<s.data.length;i++){var x=pad2.l+(i+0.5)/s.data.length*pW2;
+var y=pad2.t+(1-s.data[i]/yMax2)*(h2-pad2.t-pad2.b);
+if(i===0)ctx2.moveTo(x,y);else ctx2.lineTo(x,y)}ctx2.stroke();
+ctx2.fillStyle=s.color;ctx2.font="8px sans-serif";ctx2.textAlign="left";
+ctx2.fillText("\u25CF "+s.label,w2-pad2.r+4,pad2.t+10+si*12)}
+
+/* TB table */
+var tbl=document.getElementById("tbl7");tbl.innerHTML="";var table=document.createElement("table");
+var hdr=table.insertRow();
+["Date","DA Avg","TB1","TB2","TB4","High","Low","TB1 vs 7d Avg"].forEach(function(t){
+var th=document.createElement("th");th.textContent=t;hdr.appendChild(th)});
+var tb1Avg7=n>=7?kpiVal(ds,"tb1",7):kpiVal(ds,"tb1",n);
+var recent=ds.slice().reverse().slice(0,Math.min(60,n));
+for(var i=0;i<recent.length;i++){var d=recent[i];var row=table.insertRow();
+row.insertCell().textContent=d.date;
+row.insertCell().textContent="\u20AC"+fmt(d.avg);
+var c1=row.insertCell();c1.textContent="\u20AC"+fmt(d.tb1);c1.style.color="#eab308";
+var c2=row.insertCell();c2.textContent="\u20AC"+fmt(d.tb2);c2.style.color="#06b6d4";
+var c4=row.insertCell();c4.textContent="\u20AC"+fmt(d.tb4);c4.style.color="#a855f7";
+row.insertCell().textContent="\u20AC"+fmt(d.max);
+row.insertCell().textContent="\u20AC"+fmt(d.min);
+var diff=d.tb1-tb1Avg7;var dc=row.insertCell();dc.textContent=(diff>=0?"+":"")+fmt(diff);
+dc.className=diff>=0?"pos":"neg"}
+tbl.appendChild(table)}
+
 /* ===== MASTER DRAW ===== */
 function draw(){if(!allPrices.length)return;
 if(activeTab===0)drawSummary();else if(activeTab===1)drawBessEcon();
 else if(activeTab===2)drawSpreadDuration();else if(activeTab===3)drawPriceStructure();
 else if(activeTab===4)drawVolatility();else if(activeTab===5)drawProfiles();
-else if(activeTab===6)drawHeatmap()}
+else if(activeTab===6)drawHeatmap();else if(activeTab===7)drawTbSpreads()}
 
 function showTab(n){activeTab=n;var tabs=document.querySelectorAll(".tab");var panels=document.querySelectorAll(".panel");
 for(var i=0;i<tabs.length;i++){tabs[i].className=i===n?"tab active":"tab";panels[i].className=i===n?"panel active":"panel"}draw()}
