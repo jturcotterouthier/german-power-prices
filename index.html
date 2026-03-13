@@ -121,6 +121,7 @@ td:first-child,th:first-child{text-align:left}
 <option value="GR">Greece (GR)</option>
 </optgroup>
 </select>
+<button onclick="loadToday()">Today</button>
 <button onclick="loadRange(30)">1M</button>
 <button onclick="loadRange(90)">3M</button>
 <button onclick="loadRange(180)">6M</button>
@@ -937,6 +938,10 @@ function loadCustomRange(){var sd=document.getElementById("startDate").value;var
 if(!sd||!ed){setStatus("Please set both From and To dates");return}
 if(sd>=ed){setStatus("'From' date must be before 'To' date");return}
 currentRange=-1;fetchAPI(sd,ed)}
+
+function loadToday(){currentRange=1;var t=new Date();var e=new Date(t);e.setDate(e.getDate()+1);
+var sd=t.toISOString().slice(0,10),ed=e.toISOString().slice(0,10);
+syncDateInputs(sd,ed);fetchAPI(sd,ed)}
 
 function switchMarket(){currentBzn=document.getElementById("mktSel").value;doRefresh()}
 
