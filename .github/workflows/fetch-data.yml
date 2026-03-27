@@ -1,0 +1,36 @@
+name: Fetch Power Price Data
+
+on:
+  schedule:
+    # Run daily at 14:00 UTC (after EPEX day-ahead auction ~12:45 CET)
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Fetch latest price data
+        run: python fetch_data.py
+        timeout-minutes: 30
+
+      - name: Commit updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No data changes to commit"
+          else
+            git commit -m "chore: update power price data $(date -u +%Y-%m-%d)"
+            git push
+          fi

@@ -106,7 +106,7 @@ def merge_data(existing, new_data):
     }
 
 
-def date_chunks(start_date, end_date, chunk_days=365):
+def date_chunks(start_date, end_date, chunk_days=90):
     """Split a date range into chunks."""
     chunks = []
     current = start_date
