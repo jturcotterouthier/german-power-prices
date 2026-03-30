@@ -604,6 +604,8 @@ tr:hover td { background: rgba(74,108,247,0.05); }
   <label>To:</label>
   <input type="date" id="endDate">
   <button onclick="loadCustomRange()">Go</button>
+  <span class="sep">|</span>
+  <button id="yoyBtn" onclick="toggleYoY()" title="Overlay prior year for seasonal comparison">YoY</button>
 </div>
 
 <div id="status"></div>
@@ -761,6 +763,7 @@ var allPrices=[],startTs=0,interval=900;
 var days={},dayKeys=[],activeTab=0,currentBzn="DE-LU";
 var A={};
 var RTE=0.88;
+var yoyEnabled=false,yoyA={},yoyDayKeys=[],yoyAbort=null;
 
 /* ===== UTILITY FUNCTIONS ===== */
 function aMax(a){var m=-Infinity;for(var i=0;i<a.length;i++)if(a[i]!==null&&a[i]>m)m=a[i];return m===-Infinity?0:m}
@@ -837,6 +840,90 @@ var recent=0,prior=0;for(var i=n-w;i<n;i++)recent+=arr[i][field];
 for(var i=n-w*2;i<n-w;i++)prior+=arr[i][field];
 recent/=w;prior/=w;if(Math.abs(prior)<0.01)return null;return(recent-prior)/Math.abs(prior)*100}
 
+/* ===== YEAR-OVER-YEAR OVERLAY ===== */
+function toggleYoY(){
+yoyEnabled=!yoyEnabled;
+var btn=document.getElementById('yoyBtn');
+btn.className=yoyEnabled?'active':'';
+if(yoyEnabled){fetchYoY()}else{yoyA={};yoyDayKeys=[];draw()}}
+
+function fetchYoY(){
+if(yoyAbort){yoyAbort.abort();yoyAbort=null}
+var sd=document.getElementById('startDate').value;
+var ed=document.getElementById('endDate').value;
+if(!sd||!ed){yoyEnabled=false;return}
+var s=new Date(sd);s.setFullYear(s.getFullYear()-1);
+var e=new Date(ed);e.setFullYear(e.getFullYear()-1);
+var ysd=s.toISOString().slice(0,10);
+var yed=e.toISOString().slice(0,10);
+var ck='yoy|'+currentBzn+'|'+ysd+'|'+yed;
+if(fetchCache[ck]){processYoYData(fetchCache[ck]);return}
+yoyAbort=new AbortController();
+setStatus('Fetching prior-year data ('+ysd+' \u2192 '+yed+')...');
+fetchFromAPI(ysd,yed,yoyAbort).then(function(d){
+fetchCache[ck]=d;processYoYData(d);
+}).catch(function(e){if(e.name!=='AbortError'){
+setStatus('YoY data unavailable: '+e.message);yoyEnabled=false;
+document.getElementById('yoyBtn').className=''}})}
+
+function processYoYData(d){
+var yP=d.price,ySt=d.unix_seconds[0],yIntv=d.unix_seconds.length>1?d.unix_seconds[1]-d.unix_seconds[0]:900;
+var yD=groupByDay(yP,ySt,yIntv);yoyDayKeys=Object.keys(yD).sort();
+var ds=[];
+for(var di=0;di<yoyDayKeys.length;di++){
+var dk=yoyDayKeys[di],ps=yD[dk].prices,n=ps.length,qph=n/24;
+var mn=aMin(ps),mx=aMax(ps),av=aAvg(ps),spread=mx-mn;
+var ss=0,cc=0;for(var i=0;i<n;i++){if(ps[i]!==null){ss+=(ps[i]-av)*(ps[i]-av);cc++}}
+var sd2=cc>1?Math.sqrt(ss/(cc-1)):0;
+var nc=0;for(var i=0;i<n;i++){if(ps[i]!==null&&ps[i]<0)nc++}
+var negH=nc/qph;
+var peak=[],offpeak=[],solar=[];
+for(var i=0;i<n;i++){if(ps[i]===null)continue;var h=i/qph;
+if(h>=8&&h<20)peak.push(ps[i]);else offpeak.push(ps[i]);
+if(h>=10&&h<14)solar.push(ps[i])}
+var hourly=[];for(var hi=0;hi<24;hi++){var hStart=Math.floor(hi*qph),hEnd=Math.floor((hi+1)*qph);
+var hSum=0,hCnt=0;for(var si=hStart;si<hEnd&&si<n;si++){if(ps[si]!==null){hSum+=ps[si];hCnt++}}
+hourly.push(hCnt?hSum/hCnt:null)}
+var hValid=hourly.filter(function(v){return v!==null}).slice().sort(function(a,b){return b-a});
+var tb1=hValid.length>=2?hValid[0]-hValid[hValid.length-1]:0;
+ds.push({date:dk,min:mn,max:mx,avg:av,spread:spread,stdDev:sd2,negHours:negH,
+peakAvg:aAvg(peak),offpeakAvg:aAvg(offpeak),solarAvg:aAvg(solar),bessRev:spread*RTE,tb1:tb1,hourly:hourly})}
+yoyA.daily=ds;
+function roll(field,w){var r=[];for(var i=0;i<ds.length;i++){
+var s=Math.max(0,i-w+1),sum=0,c=0;
+for(var j=s;j<=i;j++){sum+=ds[j][field];c++}r.push(sum/c)}return r}
+yoyA.rollPrice7=roll("avg",7);yoyA.rollPrice30=roll("avg",30);
+yoyA.rollBess7=roll("bessRev",7);yoyA.rollBess30=roll("bessRev",30);
+yoyA.rollVol7=roll("stdDev",7);yoyA.rollSpread7=roll("spread",7);
+yoyA.rollTB1_7=roll("tb1",7);yoyA.rollNeg7=roll("negHours",7);
+yoyA.cumBess=[];var cum=0;
+for(var i=0;i<ds.length;i++){cum+=ds[i].bessRev;yoyA.cumBess.push(cum)}
+yoyA.solarRatio=[];
+for(var i=0;i<ds.length;i++){var bl=ds[i].avg;yoyA.solarRatio.push(bl!==0?ds[i].solarAvg/bl:1)}
+yoyA.rollSolar7=[];for(var i=0;i<yoyA.solarRatio.length;i++){
+var s=Math.max(0,i-6),sum=0,c=0;for(var j=s;j<=i;j++){sum+=yoyA.solarRatio[j];c++}yoyA.rollSolar7.push(sum/c)}
+setStatus(document.getElementById('status').textContent+' | PY: '+yoyDayKeys.length+' days');
+draw()}
+
+function yoyMax(arr){return yoyEnabled&&arr&&arr.length?aMax(arr):0}
+
+function kpiYoY(ds,yds,field,w){
+if(!yoyEnabled||!yds||!yds.length)return null;
+var n1=ds.length,n2=yds.length;if(n1<w||n2<w)return null;
+var cur=0;for(var i=n1-w;i<n1;i++)cur+=ds[i][field];cur/=w;
+var prior=0;for(var i=n2-w;i<n2;i++)prior+=yds[i][field];prior/=w;
+if(Math.abs(prior)<0.01)return null;return(cur-prior)/Math.abs(prior)*100}
+
+function drawYoYDash(ctx,arr,nTotal,pW,padL,topY,plotH,yMin,yMax,color){
+if(!yoyEnabled||!arr||!arr.length)return;
+var len=Math.min(arr.length,nTotal);
+ctx.save();ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.globalAlpha=0.5;
+ctx.beginPath();
+for(var i=0;i<len;i++){var x=padL+(i+0.5)/nTotal*pW;
+var y=topY+(1-(arr[i]-yMin)/(yMax-yMin))*plotH;
+if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}
+ctx.stroke();ctx.restore()}
+
 /* ===== CANVAS HELPERS (for tabs 5,6 and fallback) ===== */
 function clearCanvas(id,h){var c=document.getElementById(id);var r=c.getBoundingClientRect();
 c.width=r.width*2;c.height=(h||r.height)*2;var ctx=c.getContext("2d");ctx.scale(2,2);
@@ -883,16 +970,18 @@ var items=[
 {label:"Solar Cannib Index",val:fmt(A.rollSolar7[n-1]),chg:n>=14?(A.rollSolar7[n-1]-A.rollSolar7[n-8])/Math.abs(A.rollSolar7[n-8]+0.001)*100:null,spark:A.rollSolar7,color:"#f472b6"},
 {label:"Peak/Off-Peak Ratio",val:fmt(A.peakRatio[n-1]),chg:null,spark:A.peakRatio,color:"#818cf8"}
 ];
+var yoyFields=["avg","spread","bessRev",null,"negHours","stdDev",null,null];
 for(var i=0;i<items.length;i++){var it=items[i];var d=document.createElement("div");d.className="kpi";
 var chgClass=it.chg===null?"flat":it.chg>=0?"pos":"neg";
 var chgText=it.chg===null?"":"<div class=\"kc "+chgClass+"\">"+fmtPct(it.chg)+" vs prior 7d</div>";
-d.innerHTML="<div class=\"kl\">"+it.label+"</div><div class=\"kv\">"+it.val+"</div>"+chgText+sparkSVG(it.spark,it.color);
+var yoyText="";if(yoyFields[i]){var yc=kpiYoY(ds,yoyA.daily,yoyFields[i],7);if(yc!==null){var yClass=yc>=0?"pos":"neg";yoyText="<div class=\"kc "+yClass+"\">"+fmtPct(yc)+" vs PY</div>"}}
+d.innerHTML="<div class=\"kl\">"+it.label+"</div><div class=\"kv\">"+it.val+"</div>"+chgText+yoyText+sparkSVG(it.spark,it.color);
 kr.appendChild(d)}
 
 var r=clearCanvas("c0",220);var ctx=r.ctx,w=r.w,h=r.h;
 var pad={t:20,r:20,b:35,l:50};var pW=w-pad.l-pad.r;
 var vals7=A.rollBess7,vals30=A.rollBess30;
-var yMax=Math.max(aMax(vals7),aMax(vals30))*1.1;if(yMax<10)yMax=10;
+var yMax=Math.max(aMax(vals7),aMax(vals30),yoyMax(yoyA.rollBess7))*1.1;if(yMax<10)yMax=10;
 drawAxes(ctx,w,h,pad,0,yMax,null,"\u20AC/MW/day");
 xDayLabels(pad,pW,h,dayKeys,ctx);
 ctx.fillStyle="rgba(74,108,247,0.08)";ctx.beginPath();ctx.moveTo(pad.l,h-pad.b);
@@ -902,9 +991,11 @@ function drawLine(arr,color,width){ctx.strokeStyle=color;ctx.lineWidth=width||1.
 for(var i=0;i<arr.length;i++){var x=pad.l+(i+0.5)/arr.length*pW;var y=yPos(arr[i],0,yMax,h,pad);
 if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke()}
 drawLine(vals30,"rgba(255,255,255,0.4)",1);drawLine(vals7,"#22c55e",1.5);
+drawYoYDash(ctx,yoyA.rollBess7,vals7.length,pW,pad.l,pad.t,h-pad.t-pad.b,0,yMax,"#22c55e");
 ctx.fillStyle="#888";ctx.font="8px Inter,sans-serif";ctx.textAlign="right";
 ctx.fillText("7d MA",w-pad.r-2,pad.t+12);ctx.fillStyle="#22c55e";ctx.fillText("\u25CF",w-pad.r-36,pad.t+12);
 ctx.fillStyle="#888";ctx.fillText("30d MA",w-pad.r-2,pad.t+22);ctx.fillStyle="rgba(255,255,255,0.5)";ctx.fillText("\u25CF",w-pad.r-42,pad.t+22);
+if(yoyEnabled&&yoyA.rollBess7&&yoyA.rollBess7.length){ctx.fillStyle="#888";ctx.fillText("PY 7d MA",w-pad.r-2,pad.t+32);ctx.fillStyle="rgba(34,197,94,0.5)";ctx.fillText("- -",w-pad.r-56,pad.t+32)}
 buildMonthlyTable()}
 
 function buildMonthlyTable(){
@@ -932,7 +1023,7 @@ if(!A.daily||!A.daily.length)return;
 var ds=A.daily,n=ds.length;var r=clearCanvas("c1",400);var ctx=r.ctx,w=r.w,h=r.h;
 var topH=h*0.55;var pad={t:20,r:55,b:5,l:50};var pW=w-pad.l-pad.r;
 var revs=ds.map(function(d){return d.bessRev});
-var yMax=aMax(revs)*1.15;if(yMax<10)yMax=10;var bW=Math.max(2,pW/n-1);
+var yMax=Math.max(aMax(revs),yoyMax(yoyA.rollBess7))*1.15;if(yMax<10)yMax=10;var bW=Math.max(2,pW/n-1);
 ctx.fillStyle="#888";ctx.font="9px Inter,sans-serif";ctx.textAlign="left";
 ctx.fillText("Daily BESS Revenue (\u20AC/MW/day)",pad.l,pad.t-4);
 for(var i=0;i<=4;i++){var y=pad.t+i*(topH-pad.t-pad.b)/4;var val=yMax-(yMax)*i/4;
@@ -947,16 +1038,18 @@ function drawMAL(arr,color,lw){ctx.strokeStyle=color;ctx.lineWidth=lw||1.5;ctx.b
 for(var i=0;i<arr.length;i++){var x=pad.l+(i+0.5)/arr.length*pW;
 var y=pad.t+(1-(arr[i]/yMax))*(topH-pad.t-pad.b);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke()}
 drawMAL(A.rollBess30,"rgba(255,255,255,0.5)",1);drawMAL(A.rollBess7,"#eab308",1.5);
+drawYoYDash(ctx,yoyA.rollBess7,n,pW,pad.l,pad.t,topH-pad.t-pad.b,0,yMax,"#eab308");
 ctx.fillStyle="#eab308";ctx.font="8px Inter,sans-serif";ctx.textAlign="right";
 ctx.fillText("\u25CF 7d MA",w-pad.r,pad.t+8);
 ctx.fillStyle="rgba(255,255,255,0.6)";ctx.fillText("\u25CF 30d MA",w-pad.r,pad.t+18);
 ctx.fillStyle="#ef4444";ctx.fillText("\u25CF >2.5x avg",w-pad.r,pad.t+28);
+if(yoyEnabled&&yoyA.rollBess7&&yoyA.rollBess7.length){ctx.fillStyle="#888";ctx.fillText("- - PY 7d MA",w-pad.r,pad.t+38)}
 xDayLabels({t:pad.t,r:pad.r,b:5,l:pad.l},pW,topH+18,dayKeys,ctx);
 
 var botY=topH+30;var botH=h-botY-10;
 ctx.fillStyle="#888";ctx.font="9px Inter,sans-serif";ctx.textAlign="left";
 ctx.fillText("Cumulative BESS Revenue (\u20AC/MW)",pad.l,botY-4);
-var cumMax=aMax(A.cumBess)*1.1;if(cumMax<10)cumMax=10;
+var cumMax=Math.max(aMax(A.cumBess),yoyMax(yoyA.cumBess))*1.1;if(cumMax<10)cumMax=10;
 for(var i=0;i<=3;i++){var y=botY+i*botH/3;var val=cumMax-(cumMax)*i/3;
 ctx.fillStyle="#888";ctx.textAlign="right";ctx.font="8px Inter,sans-serif";ctx.fillText(Math.round(val),pad.l-4,y+3);
 ctx.strokeStyle="#1a1a2e";ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke()}
@@ -967,6 +1060,7 @@ ctx.lineTo(pad.l+(A.cumBess.length-0.5)/A.cumBess.length*pW,botY+botH);ctx.close
 ctx.strokeStyle="#06b6d4";ctx.lineWidth=2;ctx.beginPath();
 for(var i=0;i<A.cumBess.length;i++){var x=pad.l+(i+0.5)/A.cumBess.length*pW;
 var y=botY+(1-(A.cumBess[i]/cumMax))*botH;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke();
+drawYoYDash(ctx,yoyA.cumBess,A.cumBess.length,pW,pad.l,botY,botH,0,cumMax,"#06b6d4");
 
 var dowRow=document.getElementById("dowRow");dowRow.innerHTML="";
 var dowNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -997,7 +1091,9 @@ if(!A.daily||!A.daily.length)return;
 var spreads=A.daily.map(function(d){return d.spread}).slice().sort(function(a,b){return b-a});
 var n=spreads.length;var r=clearCanvas("c2",380);var ctx=r.ctx,w=r.w,h=r.h;
 var pad={t:25,r:30,b:45,l:55};var pW=w-pad.l-pad.r;var pH=h-pad.t-pad.b;
-var yMax=spreads[0]*1.1;if(yMax<50)yMax=50;
+var yMax=spreads[0]*1.1;
+if(yoyEnabled&&yoyA.daily&&yoyA.daily.length){var yoySpMax=aMax(yoyA.daily.map(function(d){return d.spread}));yMax=Math.max(yMax,yoySpMax*1.1)}
+if(yMax<50)yMax=50;
 ctx.fillStyle="#888";ctx.font="9px Inter,sans-serif";ctx.textAlign="left";
 ctx.fillText("Spread Duration Curve (\u20AC/MWh)",pad.l,pad.t-8);
 for(var i=0;i<=5;i++){var y=pad.t+i*pH/5;var val=yMax-(yMax)*i/5;
@@ -1021,6 +1117,16 @@ ctx.lineTo(pad.l+pW,pad.t+pH);ctx.lineTo(pad.l,pad.t+pH);ctx.closePath();ctx.fil
 ctx.strokeStyle="#4a6cf7";ctx.lineWidth=2;ctx.beginPath();
 for(var i=0;i<n;i++){var x=pad.l+(i/(n-1))*pW;var y=pad.t+(1-spreads[i]/yMax)*pH;
 if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke();
+if(yoyEnabled&&yoyA.daily&&yoyA.daily.length){
+var yoySpreads=yoyA.daily.map(function(d){return d.spread}).slice().sort(function(a,b){return b-a});
+var yn=yoySpreads.length;
+ctx.save();ctx.strokeStyle="#4a6cf7";ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.globalAlpha=0.5;
+ctx.beginPath();
+for(var i=0;i<yn;i++){var x=pad.l+(i/(yn-1))*pW;var y=pad.t+(1-yoySpreads[i]/yMax)*pH;
+if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}
+ctx.stroke();ctx.restore();
+ctx.fillStyle="#888";ctx.font="8px Inter,sans-serif";ctx.textAlign="left";
+ctx.fillText("- - Prior Year",pad.l+4,pad.t+14)}
 var medIdx=Math.floor(n/2);var medX=pad.l+(medIdx/(n-1))*pW;var medY=pad.t+(1-spreads[medIdx]/yMax)*pH;
 ctx.fillStyle="#eab308";ctx.beginPath();ctx.arc(medX,medY,4,0,Math.PI*2);ctx.fill();
 ctx.font="bold 9px Inter,sans-serif";ctx.textAlign="left";ctx.fillText("P50: \u20AC"+Math.round(spreads[medIdx]),medX+6,medY-4);
@@ -1044,6 +1150,7 @@ var ds=A.daily,n=ds.length;var r=clearCanvas("c3",420);var ctx=r.ctx,w=r.w,h=r.h
 var topH=h*0.55;var pad={t:20,r:20,b:5,l:50};var pW=w-pad.l-pad.r;
 var dailyAvgs=ds.map(function(d){return d.avg});
 var allVals=dailyAvgs.concat(A.rollPrice7).concat(A.rollPrice30);
+if(yoyEnabled&&yoyA.rollPrice7)allVals=allVals.concat(yoyA.rollPrice7);
 var yMin=aMin(allVals)*0.95;var yMax=aMax(allVals)*1.05;if(yMin>0)yMin=0;
 ctx.fillStyle="#888";ctx.font="9px Inter,sans-serif";ctx.textAlign="left";
 ctx.fillText("Daily Average Price & Moving Averages (\u20AC/MWh)",pad.l,pad.t-4);
@@ -1060,11 +1167,13 @@ for(var i=0;i<arr.length;i++){var x=pad.l+(i+0.5)/arr.length*pW;
 var y=pad.t+(1-(arr[i]-yMin)/(yMax-yMin))*(topH-pad.t-pad.b);
 if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke()}
 drawMAT(A.rollPrice30,"rgba(255,255,255,0.4)",1);drawMAT(A.rollPrice7,"#eab308",1.5);
+drawYoYDash(ctx,yoyA.rollPrice7,n,pW,pad.l,pad.t,topH-pad.t-pad.b,yMin,yMax,"#eab308");
 xDayLabels({t:pad.t,r:pad.r,b:5,l:pad.l},pW,topH+18,dayKeys,ctx);
 ctx.font="8px Inter,sans-serif";ctx.textAlign="right";
 ctx.fillStyle="#eab308";ctx.fillText("\u25CF 7d MA",w-pad.r,pad.t+8);
 ctx.fillStyle="rgba(255,255,255,0.5)";ctx.fillText("\u25CF 30d MA",w-pad.r,pad.t+18);
 ctx.fillStyle="rgba(74,108,247,0.6)";ctx.fillText("\u25CF Daily",w-pad.r,pad.t+28);
+if(yoyEnabled&&yoyA.rollPrice7&&yoyA.rollPrice7.length){ctx.fillStyle="#888";ctx.fillText("- - PY 7d MA",w-pad.r,pad.t+38)}
 
 var botY=topH+35;var botH=h-botY-30;
 var peaks=ds.map(function(d){return d.peakAvg});
@@ -1094,7 +1203,7 @@ function drawVolatility(){
 if(!A.daily||!A.daily.length)return;
 var ds=A.daily,n=ds.length;var r=clearCanvas("c4",420);var ctx=r.ctx,w=r.w,h=r.h;
 var topH=h*0.45;var pad={t:20,r:20,b:5,l:50};var pW=w-pad.l-pad.r;
-var vol7=A.rollVol7;var vMax=aMax(vol7)*1.15;if(vMax<5)vMax=5;
+var vol7=A.rollVol7;var vMax=Math.max(aMax(vol7),yoyMax(yoyA.rollVol7))*1.15;if(vMax<5)vMax=5;
 ctx.fillStyle="#888";ctx.font="9px Inter,sans-serif";ctx.textAlign="left";
 ctx.fillText("Rolling 7-Day Price Volatility (\u03C3 \u20AC/MWh)",pad.l,pad.t-4);
 for(var i=0;i<=4;i++){var y=pad.t+i*(topH-pad.t-pad.b)/4;var val=vMax-(vMax)*i/4;
@@ -1112,13 +1221,14 @@ ctx.fillStyle="rgba(239,68,68,0.8)";
 for(var i=0;i<vol7.length;i++){if(vol7[i]>meanVol+2*volStd){
 var x=pad.l+(i+0.5)/vol7.length*pW;var y=pad.t+(1-vol7[i]/vMax)*(topH-pad.t-pad.b);
 ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill()}}
+drawYoYDash(ctx,yoyA.rollVol7,vol7.length,pW,pad.l,pad.t,topH-pad.t-pad.b,0,vMax,"#f97316");
 xDayLabels({t:pad.t,r:pad.r,b:5,l:pad.l},pW,topH+18,dayKeys,ctx);
 
 var botY=topH+35;var botH=h-botY-30;
 ctx.fillStyle="#888";ctx.font="9px Inter,sans-serif";ctx.textAlign="left";
 ctx.fillText("Negative Price Hours Per Day",pad.l,botY-6);
 var negHrs=ds.map(function(d){return d.negHours});
-var nMax=Math.max(aMax(negHrs)*1.2,1);
+var nMax=Math.max(aMax(negHrs)*1.2,yoyMax(yoyA.rollNeg7)*1.2,1);
 for(var i=0;i<=3;i++){var y=botY+i*botH/3;var val=nMax-(nMax)*i/3;
 ctx.fillStyle="#888";ctx.textAlign="right";ctx.font="8px Inter,sans-serif";ctx.fillText(val.toFixed(1)+"h",pad.l-4,y+3);
 ctx.strokeStyle="#1a1a2e";ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke()}
@@ -1129,6 +1239,7 @@ ctx.fillStyle="rgba(168,85,247,0.5)";ctx.fillRect(x,botY+botH-bH,bW,bH)}
 ctx.strokeStyle="#a855f7";ctx.lineWidth=1.5;ctx.beginPath();
 for(var i=0;i<A.rollNeg7.length;i++){var x=pad.l+(i+0.5)/A.rollNeg7.length*pW;
 var y=botY+botH-(A.rollNeg7[i]/nMax)*botH;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke();
+drawYoYDash(ctx,yoyA.rollNeg7,A.rollNeg7.length,pW,pad.l,botY,botH,0,nMax,"#a855f7");
 var totalNeg=0,daysNeg=0;for(var i=0;i<n;i++){totalNeg+=negHrs[i];if(negHrs[i]>0)daysNeg++}
 var avgND=0,ndC=0;for(var i=0;i<n;i++)if(ds[i].negAvgDepth<0){avgND+=ds[i].negAvgDepth;ndC++}
 avgND=ndC?avgND/ndC:0;
@@ -1238,6 +1349,7 @@ if(tbView===0||tbView===3)series.push({data:A.rollTB1_7,color:"#eab308",label:"T
 if(tbView===1||tbView===3)series.push({data:A.rollTB2_7,color:"#06b6d4",label:"TB2 7d"});
 if(tbView===2||tbView===3)series.push({data:A.rollTB4_7,color:"#a855f7",label:"TB4 7d"});
 var allV=[];for(var si=0;si<series.length;si++)allV=allV.concat(series[si].data);
+if(yoyEnabled&&yoyA.rollTB1_7&&(tbView===0||tbView===3))allV=allV.concat(yoyA.rollTB1_7);
 var yMax2=aMax(allV)*1.15;if(yMax2<10)yMax2=10;var yMin2=0;
 if(tbView===2||tbView===3){var tb4Max=aMax(A.rollTB4_7);if(tb4Max>yMax2*3)yMax2=tb4Max*1.1}
 ctx2.fillStyle="#888";ctx2.font="9px Inter,sans-serif";ctx2.textAlign="left";
@@ -1253,6 +1365,10 @@ var y=pad2.t+(1-s.data[i]/yMax2)*(h2-pad2.t-pad2.b);
 if(i===0)ctx2.moveTo(x,y);else ctx2.lineTo(x,y)}ctx2.stroke();
 ctx2.fillStyle=s.color;ctx2.font="8px Inter,sans-serif";ctx2.textAlign="left";
 ctx2.fillText("\u25CF "+s.label,w2-pad2.r+4,pad2.t+10+si*12)}
+if(yoyEnabled&&yoyA.rollTB1_7&&yoyA.rollTB1_7.length&&(tbView===0||tbView===3)){
+drawYoYDash(ctx2,yoyA.rollTB1_7,n,pW2,pad2.l,pad2.t,h2-pad2.t-pad2.b,0,yMax2,"#eab308");
+ctx2.fillStyle="#888";ctx2.font="8px Inter,sans-serif";ctx2.textAlign="left";
+ctx2.fillText("- - PY TB1",w2-pad2.r+4,pad2.t+10+series.length*12)}
 
 var tbl=document.getElementById("tbl7");tbl.innerHTML="";var table=document.createElement("table");
 var hdr=table.insertRow();
@@ -1756,7 +1872,7 @@ days=groupByDay(allPrices,startTs,interval);dayKeys=Object.keys(days).sort();
 computeAnalytics();updateSlider();
 var intMins=Math.round(interval/60);var resLabel=intMins<=15?"15-min":intMins<=60?"hourly":"daily";
 setStatus("Loaded "+allPrices.length.toLocaleString()+" points ("+dayKeys[0]+" to "+dayKeys[dayKeys.length-1]+") for "+currentBzn+" | "+dayKeys.length+" days | "+resLabel+" resolution");
-draw()}
+draw();if(yoyEnabled)fetchYoY()}
 
 var currentRange=90;
 function syncDateInputs(sd,ed){document.getElementById("startDate").value=sd;document.getElementById("endDate").value=ed}
